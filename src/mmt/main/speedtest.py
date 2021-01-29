@@ -50,7 +50,8 @@ def main(argv=None):
         logger.info('[1/2] Loaded %d checkpoints in %.1fs' % (len(checkpoints), time.time() - begin_ts))
 
         begin_ts = time.time()
-        decoder = MMTDecoder(checkpoints, device=args.gpu, tuning_ops=config.tuning)
+        device=args.gpu if args.gpu >= 0 else None
+        decoder = MMTDecoder(checkpoints, device=device, tuning_ops=config.tuning)
         logger.info('[2/2] Decoder created in %.1fs' % (time.time() - begin_ts))
 
         while True:
