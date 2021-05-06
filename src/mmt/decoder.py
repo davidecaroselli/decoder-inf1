@@ -8,7 +8,7 @@ import fairseq
 import numpy as np
 import torch
 from fairseq.models.transformer import TransformerModel
-from fairseq.sequence_generator import SequenceGenerator
+from fairseq.sequence_generator import SequenceGenerator, EnsembleModel
 
 from mmt import textencoder, is_fairseq_0_10
 from mmt.alignment import make_alignment, clean_alignment
@@ -113,7 +113,7 @@ class MMTDecoder(object):
 
         if use_fp16:
             model.half()
-
+        
         return model
 
     @classmethod
@@ -152,15 +152,20 @@ class MMTDecoder(object):
             self.port_to_fairseq_0_10(self._checkpoints)
 
         self._device = device
-        self._model = self._fix_model_probs(
-            self._create_model(checkpoints, device=device, beam_size=beam_size, use_fp16=use_fp16)
-        )
+#         self._model = self._fix_model_probs(
+#             self._create_model(checkpoints, device=device, beam_size=beam_size, use_fp16=use_fp16)
+#         )
+        self._model = self._create_model(checkpoints, device=device, beam_size=beam_size, use_fp16=use_fp16)
+        
+        # Must be in eval mode to detach gradients
+        self._model.eval()
+        
         self._translator = self._create_translator([self._model], checkpoints, beam_size)
-        self._tuner = self._create_tuner(checkpoints, self._model, tuning_ops, device)
-        self._max_positions = fairseq.utils.resolve_max_positions(
-            checkpoints.task.max_positions(),
-            self._model.max_positions(),
-        )
+#         self._tuner = self._create_tuner(checkpoints, self._model, tuning_ops, device)
+#         self._max_positions = fairseq.utils.resolve_max_positions(
+#             checkpoints.task.max_positions(),
+#             self._model.max_positions(),
+#         )
 
         self._logger = logging.getLogger('Transformer')
 
@@ -282,6 +287,72 @@ class MMTDecoder(object):
             dataset = self._tuner.dataset(src_samples, tgt_samples, sub_dict)
             self._tuner.tune(dataset, num_iterations=epochs, lr=learning_rate)
             self._nn_needs_reset = True
+
+    def _decode_from_sample(self, batch):
+        
+#         prefix_lang = target_lang if self._checkpoint.multilingual_target else None
+#         batch, input_indexes, sentence_len = self._make_decode_batch(segments, prefix_lang=prefix_lang)
+
+        # Compute translation
+#         self._translator.max_len_b = self._checkpoint.decode_length(source_lang, target_lang, sentence_len)
+        translations = self._translator._generate(batch)
+
+        # Decode translation
+#         sub_dict = self._checkpoint.subword_dictionary
+
+        results = []
+#         for i, hypo in enumerate(translations):
+#             hypo = hypo[0]  # (top-1 best nbest)
+#             hypo_score = math.exp(hypo['score'])
+#             hypo_tokens = hypo['tokens']
+#             hypo_indexes = sub_dict.indexes_of(hypo_tokens)
+#             hypo_str = sub_dict.string(hypo_tokens)
+#             hypo_attention = np.asarray(hypo['attention'].data.cpu())
+
+#             # Make alignment
+#             if len(hypo_indexes) > 0:
+#                 hypo_alignment = make_alignment(input_indexes[i], hypo_indexes, hypo_attention,
+#                                                 prefix_lang=prefix_lang is not None)
+#                 hypo_alignment = clean_alignment(hypo_alignment, segments[i], hypo_str)
+#             else:
+#                 hypo_alignment = []
+
+#             results.append(Translation(hypo_str, alignment=hypo_alignment, score=hypo_score))
+
+        return results
+    
+    def _decode_without_explicit_model(self, source_lang, target_lang, segments):
+        
+        prefix_lang = target_lang if self._checkpoint.multilingual_target else None
+        batch, input_indexes, sentence_len = self._make_decode_batch(segments, prefix_lang=prefix_lang)
+
+        # Compute translation
+        self._translator.max_len_b = self._checkpoint.decode_length(source_lang, target_lang, sentence_len)
+        translations = self._translator._generate(batch)
+
+        # Decode translation
+        sub_dict = self._checkpoint.subword_dictionary
+
+        results = []
+        for i, hypo in enumerate(translations):
+            hypo = hypo[0]  # (top-1 best nbest)
+            hypo_score = math.exp(hypo['score'])
+            hypo_tokens = hypo['tokens']
+            hypo_indexes = sub_dict.indexes_of(hypo_tokens)
+            hypo_str = sub_dict.string(hypo_tokens)
+            hypo_attention = np.asarray(hypo['attention'].data.cpu())
+
+            # Make alignment
+            if len(hypo_indexes) > 0:
+                hypo_alignment = make_alignment(input_indexes[i], hypo_indexes, hypo_attention,
+                                                prefix_lang=prefix_lang is not None)
+                hypo_alignment = clean_alignment(hypo_alignment, segments[i], hypo_str)
+            else:
+                hypo_alignment = []
+
+            results.append(Translation(hypo_str, alignment=hypo_alignment, score=hypo_score))
+
+        return results
 
     def _decode(self, source_lang, target_lang, segments):
         prefix_lang = target_lang if self._checkpoint.multilingual_target else None
