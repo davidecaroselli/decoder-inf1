@@ -54,11 +54,24 @@ def main(argv=None):
         decoder = MMTDecoder(checkpoints, device=device, tuning_ops=config.tuning)
         logger.info('[2/2] Decoder created in %.1fs' % (time.time() - begin_ts))
 
-        while True:
+        i = 0
+        max_runs = 5
+        print(f'== Running the same translation {max_runs} times (after warm up) ==')
+        while i <= max_runs:
+            if i == 0:
+                print('-- Warm Up --')
+            elif i == 1:
+                print('-- Timing --')
             translation = translate_test(decoder, adaptive=args.adaptive)
-
-            print(translation.text)
-            print(translation.alignment)
+            if i == 0:
+                print('------')
+                print(f'- Original text: {TEST_TEXT}')
+                print('------')
+                print(f'- Translated text: {translation.text}')
+                print('------')
+                print(f'- Alignment: {translation.alignment}')
+                print('---------------------------------------')
+            i += 1
     except KeyboardInterrupt:
         pass  # ignore and exit
 
